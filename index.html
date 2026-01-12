@@ -3,21 +3,21 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Sovereign Alchemist: Rage Edition</title>
+    <title>Sovereign Alchemist: Mobile & Desktop</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #000; font-family: 'Courier New', monospace; }
-        #input_video { position: absolute; bottom: 10px; right: 10px; width: 120px; transform: scaleX(-1); opacity: 0; pointer-events: none; }
-        #ui { position: absolute; top: 20px; left: 20px; color: #0ff; pointer-events: none; z-index: 10; text-shadow: 0 0 5px #0ff; }
-        .hud-box { background: rgba(0, 255, 255, 0.1); border-left: 3px solid #0ff; padding: 10px; margin-bottom: 5px; transition: 0.2s; }
-        .rage-mode { border-left: 3px solid #f00 !important; background: rgba(255, 0, 0, 0.2) !important; color: #f00 !important; text-shadow: 0 0 8px #f00 !important; }
-        canvas#matrix { position: absolute; top: 0; left: 0; z-index: -1; }
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Courier New', monospace; touch-action: none; }
+        #matrix { position: absolute; top: 0; left: 0; z-index: -1; }
+        #ui { position: absolute; top: 20px; left: 20px; color: #0ff; pointer-events: none; z-index: 10; text-shadow: 0 0 5px #0ff; font-size: 14px; }
+        .hud-box { background: rgba(0, 255, 255, 0.1); border-left: 3px solid #0ff; padding: 10px; margin-bottom: 5px; transition: 0.3s; width: fit-content; }
+        .rage-ui { border-left: 3px solid #f00 !important; color: #f00 !important; background: rgba(255, 0, 0, 0.2) !important; transform: scale(1.1); text-shadow: 0 0 10px #f00; }
+        #input_video { position: absolute; opacity: 0; width: 1px; height: 1px; }
     </style>
 </head>
 <body>
     <canvas id="matrix"></canvas>
     <div id="ui">
         <div id="sys-box" class="hud-box">SYSTEM: <span id="status">INITIATING...</span></div>
-        <div id="bio-box" class="hud-box">BIO-STREAM: <span id="sub-status">AWAITING CLICK</span></div>
+        <div id="bio-box" class="hud-box">HAPTICS: <span id="haptic-status">WAITING FOR TOUCH</span></div>
     </div>
     <video id="input_video" autoplay playsinline muted></video>
 
@@ -27,238 +27,118 @@
     <script type="module">
         import * as THREE from 'three';
 
-        // --- MATRIX BACKGROUND ---
+        // --- MATRIX ENGINE ---
         const mCanvas = document.getElementById('matrix');
         const mCtx = mCanvas.getContext('2d');
-        let mWidth, mHeight, mCols;
-        const mChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789$+-*/=%<>#!&";
-        const mFontSize = 16;
-        let mDrops = [];
-
-        function initMatrix() {
-            mWidth = window.innerWidth; mHeight = window.innerHeight;
-            mCanvas.width = mWidth; mCanvas.height = mHeight;
-            mCols = Math.floor(mWidth / mFontSize);
+        let mCols, mDrops = [];
+        const chars = "0123456789ABCDEFHIJKLMNOPQRSTUVWXYZ$#@&";
+        function initM() {
+            mCanvas.width = window.innerWidth; mCanvas.height = window.innerHeight;
+            mCols = Math.floor(mCanvas.width / 16);
             mDrops = Array(mCols).fill(1);
         }
-        window.addEventListener('resize', () => {
-            initMatrix();
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        });
-        initMatrix();
+        initM(); window.addEventListener('resize', initM);
 
-        function drawMatrix(isRaging) {
-            // If raging, trail fades faster (0.2) for chaos, else smooth (0.08)
-            mCtx.fillStyle = isRaging ? "rgba(0, 0, 0, 0.2)" : "rgba(0, 0, 0, 0.08)";
-            mCtx.fillRect(0, 0, mWidth, mHeight);
-            
-            mCtx.fillStyle = isRaging ? "#F00" : "#0F0"; // Red or Green
-            mCtx.font = mFontSize + "px monospace";
-            
-            for (let i = 0; i < mDrops.length; i++) {
-                const text = mChars[Math.floor(Math.random() * mChars.length)];
-                mCtx.fillText(text, i * mFontSize, mDrops[i] * mFontSize);
-                
-                // Random reset to top
-                if (mDrops[i] * mFontSize > mHeight && Math.random() > 0.975) mDrops[i] = 0;
-                
-                // Speed: Increment by 1 normally, or 3 if raging
-                mDrops[i] += isRaging ? 3 : 1;
-            }
+        function drawM(rage) {
+            mCtx.fillStyle = rage ? "rgba(50, 0, 0, 0.2)" : "rgba(0, 0, 0, 0.08)";
+            mCtx.fillRect(0, 0, mCanvas.width, mCanvas.height);
+            mCtx.fillStyle = rage ? "#f00" : "#0f0";
+            mCtx.font = "16px monospace";
+            mDrops.forEach((d, i) => {
+                mCtx.fillText(chars[Math.floor(Math.random()*chars.length)], i*16, d*16);
+                if (d*16 > mCanvas.height && Math.random() > 0.975) mDrops[i] = 0;
+                mDrops[i] += rage ? 5 : 1;
+            });
         }
 
-        // --- AUDIO ENGINE ---
-        let audioCtx, analyser, dataArr, audioActive = false;
-        async function startAudio() {
-            if (audioActive) return;
-            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        // --- AUDIO & HAPTIC ENGINE ---
+        let audioCtx, analyser, dataArr, audioReady = false;
+        window.addEventListener('click', async () => {
+            if (audioReady) return;
             try {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                const source = audioCtx.createMediaStreamSource(stream);
-                analyser = audioCtx.createAnalyser();
-                analyser.fftSize = 256;
+                const src = audioCtx.createMediaStreamSource(stream);
+                analyser = audioCtx.createAnalyser(); analyser.fftSize = 256;
                 dataArr = new Uint8Array(analyser.frequencyBinCount);
-                source.connect(analyser);
-                audioActive = true;
-                document.getElementById('sub-status').innerText = "SENSORS ACTIVE";
-            } catch(e) { console.log("Audio permission denied"); }
-        }
-        window.addEventListener('click', startAudio);
+                src.connect(analyser);
+                audioReady = true;
+                document.getElementById('haptic-status').innerText = "LINK ESTABLISHED";
+            } catch (e) { console.error("Audio failed:", e); }
+        });
 
         // --- THREE.JS SCENE ---
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
         camera.position.z = 25;
-        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        const renderer = new THREE.WebGLRenderer({ antialias: false, alpha: true }); // Fast rendering
         renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.domElement.style.pointerEvents = 'none';
         document.body.appendChild(renderer.domElement);
 
-        const ptsPerEntity = 489;
-        const entities = 3;
-        const totalPoints = ptsPerEntity * 3;
-        const geometry = new THREE.BufferGeometry();
-        const posAttr = new Float32Array(totalPoints * 3);
-        const colAttr = new Float32Array(totalPoints * 3);
-        geometry.setAttribute('position', new THREE.BufferAttribute(posAttr, 3));
-        geometry.setAttribute('color', new THREE.BufferAttribute(colAttr, 3));
+        const geo = new THREE.BufferGeometry();
+        const posArr = new Float32Array(500 * 3), colArr = new Float32Array(500 * 3);
+        geo.setAttribute('position', new THREE.BufferAttribute(posArr, 3));
+        geo.setAttribute('color', new THREE.BufferAttribute(colArr, 3));
+        const points = new THREE.Points(geo, new THREE.PointsMaterial({ size: 0.2, vertexColors: true }));
+        scene.add(points);
 
-        const material = new THREE.PointsMaterial({ size: 0.16, vertexColors: true, blending: THREE.AdditiveBlending, depthTest: false });
-        const cloud = new THREE.Points(geometry, material);
-        scene.add(cloud);
-
-        // Safe Fallback for Facemesh Connectivity
-        const faceConn = (typeof FACEMESH_TESSELATION !== 'undefined') ? FACEMESH_TESSELATION : 
-                         (window.FaceMesh && window.FaceMesh.FACEMESH_TESSELATION) ? window.FaceMesh.FACEMESH_TESSELATION : [];
-
-        const lineGeo = new THREE.BufferGeometry();
-        const linePos = new Float32Array((faceConn.length || 0) * 2 * 3);
-        lineGeo.setAttribute('position', new THREE.BufferAttribute(linePos, 3));
-        const lineMat = new THREE.LineBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending, depthTest: false });
-        const wireframe = new THREE.LineSegments(lineGeo, lineMat);
-        scene.add(wireframe);
-
-        let faceData, LHand, RHand;
-        const L_EYE = [469, 470, 471, 472], R_EYE = [474, 475, 476, 477];
-
-        // --- AI ENGINE (Force Start Logic) ---
-        const holistic = new Holistic({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${file}`});
-        holistic.setOptions({ modelComplexity: 1, smoothLandmarks: true });
-        holistic.onResults(res => { 
-            faceData = res.faceLandmarks; 
-            LHand = res.leftHandLandmarks; 
-            RHand = res.rightHandLandmarks; 
-        });
+        // --- AI ENGINE (Optimized for Mobile) ---
+        let face;
+        const holistic = new Holistic({locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${f}`});
+        holistic.setOptions({ modelComplexity: 0, smoothLandmarks: true, minDetectionConfidence: 0.5 }); // Complexity 0 for Speed
+        holistic.onResults(r => { face = r.faceLandmarks; });
 
         const video = document.getElementById('input_video');
-        async function startCamera() {
-            try {
-                // Video only here, Audio handled separately to prevent feedback loops
-                const s = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-                video.srcObject = s;
-                video.onloadedmetadata = () => {
-                    video.play();
-                    document.getElementById('status').innerText = "AI LOADING...";
-                    const detect = async () => { 
-                        if (video.readyState >= 2) await holistic.send({image: video}); 
-                        requestAnimationFrame(detect); 
-                    };
-                    detect();
-                };
-            } catch (err) {
-                document.getElementById('status').innerText = "CAM ERROR";
-            }
-        }
-        startCamera();
+        navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } }).then(s => {
+            video.srcObject = s;
+            video.onloadedmetadata = () => {
+                const detect = async () => { if(video.readyState >= 2) await holistic.send({image:video}); requestAnimationFrame(detect); };
+                detect();
+            };
+        });
 
+        // --- CORE ANIMATION LOOP ---
         function animate() {
-            // 1. Calculate Volume and Rage State
             let vol = 0;
-            if (audioActive && analyser && dataArr) {
-                analyser.getByteFrequencyData(dataArr);
-                vol = dataArr.reduce((a,b) => a+b, 0) / dataArr.length;
+            if (audioReady) { 
+                analyser.getByteFrequencyData(dataArr); 
+                vol = dataArr.reduce((a, b) => a + b) / dataArr.length; 
             }
             
-            // THRESHOLD: If volume > 35, Trigger Rage
-            const isRaging = vol > 35;
-            
-            // Update HUD Styles
-            const hud1 = document.getElementById('sys-box');
-            const hud2 = document.getElementById('bio-box');
-            if (isRaging) {
-                hud1.classList.add('rage-mode');
-                hud2.classList.add('rage-mode');
-                hud1.innerHTML = "SYSTEM: <span id='status'>CRITICAL SURGE</span>";
+            const rage = vol > 35; // Threshold for Red Mode
+            drawM(rage);
+
+            const sysBox = document.getElementById('sys-box');
+            if (rage) {
+                sysBox.classList.add('rage-ui');
+                document.getElementById('status').innerText = "RAGE OVERLOAD";
+                if (navigator.vibrate) navigator.vibrate([50, 30, 50]); // Vibration Pattern
             } else {
-                hud1.classList.remove('rage-mode');
-                hud2.classList.remove('rage-mode');
-                // Only reset text if we are actually online
-                if(faceData) hud1.innerHTML = "SYSTEM: <span id='status'>SOVEREIGN ONLINE</span>";
+                sysBox.classList.remove('rage-ui');
+                if (face) document.getElementById('status').innerText = "SOVEREIGN ONLINE";
             }
 
-            // Draw Matrix with current state
-            drawMatrix(isRaging);
-            
-            requestAnimationFrame(animate);
+            if (face) {
+                const p = geo.attributes.position.array;
+                const c = geo.attributes.color.array;
+                const scale = rage ? -65 : -40; // Grow when loud
+                const jitter = rage ? (Math.random()-0.5)*1.5 : 0;
 
-            const p = geometry.attributes.position.array;
-            const c = geometry.attributes.color.array;
-            const lp = lineGeo.attributes.position.array;
-            const nod = vol * 0.15;
-            const glow = 1 + (vol / 40);
-
-            if (faceData) {
-                let lpIdx = 0;
-                for (let e = 0; e < 3; e++) {
-                    const base = e * ptsPerEntity * 3;
-                    const entX = (e === 0) ? 0 : (e === 1 ? (LHand ? (LHand[9].x-0.5)*-40 : -15) : (RHand ? (RHand[9].x-0.5)*-40 : 15));
-                    const entY = (e === 0) ? 0 : (e === 1 ? (LHand ? (LHand[9].y-0.5)*-30 : -8) : (RHand ? (RHand[9].y-0.5)*-30 : -8));
-                    const scale = (e === 0) ? -40 : -18;
+                for (let i = 0; i < 468; i++) {
+                    const lm = face[i];
+                    p[i*3] = (lm.x - 0.5) * scale + jitter;
+                    p[i*3+1] = (lm.y - 0.5) * (scale*0.8) + jitter + (vol*0.1);
+                    p[i*3+2] = lm.z * 10;
                     
-                    // Jitter Effect: If raging, shake the entities
-                    const jitter = isRaging ? (Math.random() - 0.5) * 0.5 : 0;
-
-                    for (let i = 0; i < 468; i++) {
-                        const idx = base + i * 3;
-                        const lm = faceData[i];
-                        if (!lm) continue;
-
-                        p[idx] = entX + (lm.x - 0.5) * scale + jitter;
-                        p[idx+1] = entY + (lm.y - 0.5) * (scale * 0.8) + nod + jitter;
-                        p[idx+2] = lm.z * 10;
-                        
-                        // Color Logic: Red if raging, else Normal
-                        if (isRaging) {
-                            c[idx] = 1; c[idx+1] = 0; c[idx+2] = 0; // All Red
-                        } else {
-                            if (e === 0) { c[idx]=0; c[idx+1]=1; c[idx+2]=1; } // Cyan
-                            else if (e === 1) { c[idx]=1; c[idx+1]=0; c[idx+2]=1; } // Magenta
-                            else { c[idx]=0; c[idx+1]=1; c[idx+2]=0; } // Green
-                        }
-                    }
-                    
-                    // Hands logic (Simplified for brevity, same red logic applies)
-                     const hRef = (e === 1) ? LHand : (e === 2 ? RHand : null);
-                    for (let i = 0; i < 21; i++) {
-                        const idx = base + (468 + i) * 3;
-                        if (hRef && hRef[i]) {
-                             p[idx] = entX + (hRef[i].x - 0.5) * scale + jitter;
-                             p[idx+1] = entY + (hRef[i].y - 0.5) * scale + nod + jitter;
-                             p[idx+2] = hRef[i].z * 10;
-                             if (isRaging) { c[idx]=1; c[idx+1]=0; c[idx+2]=0; }
-                             else { c[idx]=1; c[idx+1]=1; c[idx+2]=1; }
-                        } else {
-                             p[idx+1] = -100;
-                        }
-                    }
-
-                    if (e === 0 && faceConn.length > 0) {
-                        faceConn.forEach((pair) => {
-                            // Robust access for array or object pair
-                            const start = pair[0] !== undefined ? pair[0] : pair;
-                            const end = pair[1] !== undefined ? pair[1] : pair;
-                            
-                            const sLM = faceData[start], eLM = faceData[end];
-                            if (sLM && eLM) {
-                                lp[lpIdx++] = (sLM.x - 0.5) * -40 + jitter; lp[lpIdx++] = (sLM.y - 0.5) * -32 + nod + jitter; lp[lpIdx++] = sLM.z * 10;
-                                lp[lpIdx++] = (eLM.x - 0.5) * -40 + jitter; lp[lpIdx++] = (eLM.y - 0.5) * -32 + nod + jitter; lp[lpIdx++] = eLM.z * 10;
-                            }
-                        });
-                    }
+                    if (rage) { c[i*3]=1; c[i*3+1]=0; c[i*3+2]=0; } // Red
+                    else { c[i*3]=0; c[i*3+1]=1; c[i*3+2]=1; } // Cyan
                 }
+                geo.attributes.position.needsUpdate = true;
+                geo.attributes.color.needsUpdate = true;
             }
-            
-            // Update line color if raging
-            if (isRaging) { lineMat.color.setHex(0xFF0000); lineMat.opacity = 0.8; }
-            else { lineMat.color.setHex(0x00FFFF); lineMat.opacity = 0.3; }
-
-            geometry.attributes.position.needsUpdate = true;
-            geometry.attributes.color.needsUpdate = true;
-            lineGeo.attributes.position.needsUpdate = true;
             renderer.render(scene, camera);
-        } 
+            requestAnimationFrame(animate);
+        }
         animate();
     </script>
 </body>
