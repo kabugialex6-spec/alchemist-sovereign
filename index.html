@@ -107,14 +107,29 @@
         // --- AI ENGINE ---
         const holistic = new Holistic({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${file}`});
         holistic.setOptions({ modelComplexity: 1, smoothLandmarks: true });
-        holistic.onResults(res => { faceData = res.faceLandmarks; LHand = res.leftHandLandmarks; RHand = res.rightHandLandmarks; });
+        holistic.onResults(res => { 
+            faceData = res.faceLandmarks; 
+            LHand = res.leftHandLandmarks; 
+            RHand = res.rightHandLandmarks; 
+        });
 
         const video = document.getElementById('input_video');
         async function startCamera() {
-            const s = await navigator.mediaDevices.getUserMedia({ video: true });
-            video.srcObject = s;
-            const detect = async () => { await holistic.send({image: video}); requestAnimationFrame(detect); };
-            detect();
+            try {
+                const s = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                video.srcObject = s;
+                video.onloadedmetadata = () => {
+                    video.play();
+                    document.getElementById('status').innerText = "CONNECTING AI...";
+                    const detect = async () => { 
+                        await holistic.send({image: video}); 
+                        requestAnimationFrame(detect); 
+                    };
+                    detect();
+                };
+            } catch (err) {
+                document.getElementById('status').innerText = "CAMERA ERROR";
+            }
         }
         startCamera();
 
@@ -134,6 +149,7 @@
             const glow = 1 + (vol / 40);
 
             if (faceData) {
+                document.getElementById('status').innerText = "SOVEREIGN ONLINE";
                 let lpIdx = 0;
                 for (let e = 0; e < 3; e++) {
                     const base = e * ptsPerEntity * 3;
