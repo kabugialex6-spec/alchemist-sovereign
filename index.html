@@ -1,1 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Sovereign Alchemist: Matrix Edition</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Courier New', monospace; }
+        #input_video { position: absolute; bottom: 10px; right: 10px; width: 120px; transform: scaleX(-1); opacity: 0.15; border: 1px solid #0ff; border-radius: 5px; pointer-events: none; }
+        #ui { position: absolute; top: 20px; left: 20px; color: #0ff; pointer-events: none; z-index: 10; text-shadow: 0 0 5px #0ff; }
+        .hud-box { background: rgba(0, 255, 255, 0.1); border-left: 3px solid #0ff; padding: 10px; margin-bottom: 5px; }
+        canvas#matrix { position: absolute; top: 0; left: 0; z-index: -1; }
+    </style>
+</head>
+<body>
+    <canvas id="matrix"></canvas>
+    <div id="ui">
+        <div class="hud-box">SYSTEM: <span id="status">INITIATING...</span></div>
+        <div class="hud-box">BIO-STREAM: <span id="sub-status">AWAITING CLICK</span></div>
+    </div>
+    <video id="input_video" autoplay playsinline></video>
 
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/holistic/holistic.js"></script>
+    <script type="importmap"> { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } } </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        // --- MATRIX BACKGROUND ---
+        const mCanvas = document.getElementById('matrix');
+        const mCtx = mCanvas.getContext('2d');
+        let mWidth, mHeight, mCols;
+        const mChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789$+-*/=%<>#!&";
+        const mFontSize = 16;
+        let mDrops = [];
+
+        function initMatrix() {
+            mWidth = window.innerWidth; mHeight = window.innerHeight;
+            mCanvas.width = mWidth; mCanvas.height = mHeight;
+            mCols = Math.floor(mWidth / mFontSize);
+            mDrops = Array(mCols).fill(1);
+        }
+        window.addEventListener('resize', initMatrix);
+        initMatrix();
+
+        function drawMatrix() {
+            mCtx.fillStyle = "rgba(0, 0, 0, 0.08)";
+            mCtx.fillRect(0, 0, mWidth, mHeight);
+            mCtx.fillStyle = "#0F0";
+            mCtx.font = mFontSize + "px monospace";
+            for (let i = 0; i < mDrops.length; i++) {
+                const text = mChars[Math.floor(Math.random() * mChars.length)];
+                mCtx.fillText(text, i * mFontSize, mDrops[i] * mFontSize);
+                if (mDrops[i] * mFontSize > mHeight && Math.random() > 0.975) mDrops[i] = 0;
+                mDrops[i]++;
+            }
+        }
+
+        // --- AUDIO ---
+        let audioCtx, analyser, dataArr, audioActive = false;
+        async function startAudio() {
+            if (audioActive) return;
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const source = audioCtx.createMediaStreamSource(stream);
+            analyser = audioCtx.createAnalyser();
+            analyser.fftSize = 256;
+            dataArr = new Uint8Array(analyser.frequencyBinCount);
+            source.connect(analyser);
+            audioActive = true;
+            document.getElementById('status').innerText = "ONLINE";
+            document.getElementById('sub-status').innerText = "VOICE SENSORS ACTIVE";
+        }
+        window.addEventListener('click', startAudio);
+
+        // --- THREE.JS SCENE ---
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+        camera.position.z = 25;
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        const ptsPerEntity = 489;
+        const totalPoints = ptsPerEntity * 3;
+        const geometry = new THREE.BufferGeometry();
+        const posAttr = new Float32Array(totalPoints * 3);
+        const colAttr = new Float32Array(totalPoints * 3);
+        geometry.setAttribute('position', new THREE.BufferAttribute(posAttr, 3));
+        geometry.setAttribute('color', new THREE.BufferAttribute(colAttr, 3));
+
+        const material = new THREE.PointsMaterial({ size: 0.16, vertexColors: true, blending: THREE.AdditiveBlending });
+        const cloud = new THREE.Points(geometry, material);
+        scene.add(cloud);
+
+        const faceConn = Holistic.FACEMESH_TESSELATION;
+        const lineGeo = new THREE.BufferGeometry();
+        const linePos = new Float32Array(faceConn.length * 2 * 3);
+        lineGeo.setAttribute('position', new THREE.BufferAttribute(linePos, 3));
+        const lineMat = new THREE.LineBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending });
+        const wireframe = new THREE.LineSegments(lineGeo, lineMat);
+        scene.add(wireframe);
+
+        let faceData, LHand, RHand;
+        const L_EYE = [469, 470, 471, 472], R_EYE = [474, 475, 476, 477], TONGUE = [13, 14, 15, 16];
+
+        // --- AI ENGINE ---
+        const holistic = new Holistic({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${file}`});
+        holistic.setOptions({ modelComplexity: 1, smoothLandmarks: true });
+        holistic.onResults(res => { faceData = res.faceLandmarks; LHand = res.leftHandLandmarks; RHand = res.rightHandLandmarks; });
+
+        const video = document.getElementById('input_video');
+        async function startCamera() {
+            const s = await navigator.mediaDevices.getUserMedia({ video: true });
+            video.srcObject = s;
+            const detect = async () => { await holistic.send({image: video}); requestAnimationFrame(detect); };
+            detect();
+        }
+        startCamera();
+
+        function animate() {
+            drawMatrix();
+            requestAnimationFrame(animate);
+            let vol = 0;
+            if (audioActive) {
+                analyser.getByteFrequencyData(dataArr);
+                vol = dataArr.reduce((a,b) => a+b) / dataArr.length;
+            }
+
+            const p = geometry.attributes.position.array;
+            const c = geometry.attributes.color.array;
+            const lp = lineGeo.attributes.position.array;
+            const nod = vol * 0.18;
+            const glow = 1 + (vol / 40);
+
+            if (faceData) {
+                let lpIdx = 0;
+                for (let e = 0; e < 3; e++) {
+                    const base = e * ptsPerEntity * 3;
+                    const entX = (e === 0) ? 0 : (e === 1 ? (LHand ? (LHand[9].x-0.5)*-40 : -15) : (RHand ? (RHand[9].x-0.5)*-40 : 15));
+                    const entY = (e === 0) ? 0 : (e === 1 ? (LHand ? (LHand[9].y-0.5)*-30 : -8) : (RHand ? (RHand[9].y-0.5)*-30 : -8));
+                    const scale = (e === 0) ? -40 : -18;
+
+                    for (let i = 0; i < 468; i++) {
+                        const idx = base + i * 3;
+                        const lm = faceData[i];
+                        p[idx] = entX + (lm.x - 0.5) * scale;
+                        p[idx+1] = entY + (lm.y - 0.5) * (scale * 0.8) + nod;
+                        p[idx+2] = lm.z * 8;
+
+                        if (L_EYE.includes(i) || R_EYE.includes(i)) { c[idx]=1*glow; c[idx+1]=1*glow; c[idx+2]=0; }
+                        else if (TONGUE.includes(i)) { c[idx]=1; c[idx+1]=0; c[idx+2]=0; }
+                        else {
+                            if (e===0) { c[idx]=0; c[idx+1]=1; c[idx+2]=1; }
+                            else if (e===1) { c[idx]=1; c[idx+1]=0; c[idx+2]=1; }
+                            else { c[idx]=0.2; c[idx+1]=1; c[idx+2]=0.2; }
+                        }
+                    }
+
+                    const hRef = (e === 1) ? LHand : RHand;
+                    for (let i = 0; i < 21; i++) {
+                        const idx = base + (468 + i) * 3;
+                        if (hRef) {
+                            p[idx] = entX + (hRef[i].x - 0.5) * scale;
+                            p[idx+1] = entY + (hRef[i].y - 0.5) * scale + nod;
+                            p[idx+2] = hRef[i].z * 10;
+                            c[idx]=1; c[idx+1]=1; c[idx+2]=1;
+                        } else { p[idx+1] = -100; }
+                    }
+
+                    if (e === 0) {
+                        faceConn.forEach(([start, end]) => {
+                            const sLM = faceData[start], eLM = faceData[end];
+                            lp[lpIdx++] = (sLM.x - 0.5) * -40; lp[lpIdx++] = (sLM.y - 0.5) * -32 + nod; lp[lpIdx++] = sLM.z * 8;
+                            lp[lpIdx++] = (eLM.x - 0.5) * -40; lp[lpIdx++] = (eLM.y - 0.5) * -32 + nod; lp[lpIdx++] = eLM.z * 8;
+                        });
+                    }
+                }
+            }
+            geometry.attributes.position.needsUpdate = true;
+            geometry.attributes.color.needsUpdate = true;
+            lineGeo.attributes.position.needsUpdate = true;
+            renderer.render(scene, camera);
+        }
+        animate();
+    </script>
+</body>
+</html>
